@@ -1,6 +1,6 @@
 "use client";
 import { useEffect, useState } from "react";
-import { signOut } from "next-auth/react";
+import { useSession, signIn, signOut } from '@/lib/noauth';
 
 type Site = { id: string; code: string; name: string };
 
