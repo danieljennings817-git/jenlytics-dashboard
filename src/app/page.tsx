@@ -1,5 +1,5 @@
 "use client";
-import { signIn } from "next-auth/react";
+import { useSession, signIn, signOut } from '@/lib/noauth';
 import { useState } from "react";
 
 export default function LoginPage() {
