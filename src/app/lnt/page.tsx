@@ -1,21 +1,41 @@
 "use client";
+
 import { useEffect, useState } from "react";
-import { useSession, signIn, signOut } from '@/lib/noauth';
 
-type Site = { id: string; code: string; name: string };
+type Site = { code: string; name?: string };
 
-export default function LntHome() {
+const API = process.env.NEXT_PUBLIC_API_URL!; // must be set in Render env
+
+export default function LntPage() {
   const [sites, setSites] = useState<Site[]>([]);
   const [loading, setLoading] = useState(true);
+  const [err, setErr] = useState<string>("");
 
   useEffect(() => {
     (async () => {
+      setLoading(true);
+      setErr("");
       try {
-        const r = await fetch(`/api/proxy/sites`, { cache: "no-store" });
-        const data = await r.json().catch(() => null);
-        if (Array.isArray(data)) setSites(data.filter(s => s?.code?.startsWith("LNT-")));
-        else setSites([]);
-      } catch {
+        if (!API) {
+          setErr("NEXT_PUBLIC_API_URL is not set");
+          setSites([]);
+          return;
+        }
+        const r = await fetch(`${API}/sites`, { cache: "no-store" });
+        if (!r.ok) {
+          setErr(`API responded ${r.status}`);
+          setSites([]);
+          return;
+        }
+        const j = await r.json().catch(() => []);
+        if (!Array.isArray(j)) {
+          setErr("Unexpected response shape");
+          setSites([]);
+          return;
+        }
+        setSites(j);
+      } catch (e: any) {
+        setErr(String(e?.message || e));
         setSites([]);
       } finally {
         setLoading(false);
@@ -27,36 +47,39 @@ export default function LntHome() {
     <main className="max-w-5xl mx-auto p-4">
       <header className="flex items-center justify-between mb-4">
         <div className="flex items-center gap-2">
-          <img src="/lnt_care_developments_logo.jpeg" alt="LNT Group" className="h-9 rounded" />
-          <h1 className="text-2xl font-extrabold text-gray-800">LNT Group — Energy</h1>
+          <img src="/lnt-badge.svg" alt="LNT" className="h-6" />
+          <h1 className="text-2xl font-extrabold">LNT Group — Energy</h1>
         </div>
-        <div className="flex items-center gap-3">
-          <div className="flex items-center gap-1 text-sm text-gray-600">
-            <img src="/logo.png" alt="Jenlytics" className="h-4 opacity-80" />
-            <span>Powered by Jenlytics</span>
-          </div>
-          <button onClick={() => signOut({ callbackUrl: "/" })} className="text-sm text-gray-700 border rounded px-2 py-1 hover:bg-gray-50">
-            Logout
-          </button>
-        </div>
+        <a href="/" className="text-sm border rounded px-2 py-1 hover:bg-gray-50">Logout</a>
       </header>
 
       {loading ? (
         <div className="text-gray-500">Loading sites…</div>
       ) : sites.length === 0 ? (
-        <div className="text-gray-500">No sites to show. Check API connection.</div>
-      ) : (
-        <div className="grid gap-4 sm:grid-cols-2 md:grid-cols-3">
-          {sites.map((s) => (
-            <a key={s.id} href={`/site/${encodeURIComponent(s.code)}`} className="bg-white border rounded-xl p-4 hover:shadow transition">
-              <div className="font-bold">{s.name}</div>
-              <div className="text-xs text-gray-500">{s.code}</div>
-              <div className="mt-2 text-xs text-gray-700">Electric · Heat · Water</div>
-            </a>
-          ))}
+        <div className="text-gray-600">
+          <div>No sites to show. Check API connection.</div>
+          <div className="mt-2 text-xs text-gray-500">
+            <div><b>API:</b> {API || "(not set)"}</div>
+            {err && <div><b>Error:</b> {err}</div>}
+          </div>
         </div>
+      ) : (
+        <ul className="grid sm:grid-cols-2 gap-3">
+          {sites.map(s => (
+            <li key={s.code}>
+              <a
+                href={`/site/${encodeURIComponent(s.code)}`}
+                className="block border rounded-lg p-3 hover:bg-gray-50"
+              >
+                <div className="font-semibold">{s.name || s.code}</div>
+                <div className="text-xs text-gray-500">{s.code}</div>
+              </a>
+            </li>
+          ))}
+        </ul>
       )}
     </main>
   );
 }
+
 
