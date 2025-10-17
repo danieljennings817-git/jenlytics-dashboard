@@ -280,7 +280,7 @@ export default function ClientSitePage({ code }: { code: string }) {
                     <div className="text-sm text-gray-700">Quantity: <b>{Number(r.qty ?? 0).toFixed(2)} {r.unit}</b></div>
                     <div className="text-sm text-gray-700">Energy cost: <b>£{Number(r.energy_cost ?? 0).toFixed(2)}</b></div>
                     <div className="text-sm text-gray-700">Standing ({r.days}d): <b>£{Number(r.standing_cost ?? 0).toFixed(2)}</b></div>
-                    <div className="mt-1 font-bold">Total: £{Number(r.total ?? 0).toFixed(2)}</b></div>
+                    <div className="mt-1 font-bold">Total: £{Number(r.total ?? 0).toFixed(2)}</div>
                   </div>
                 ))}
               </div>
