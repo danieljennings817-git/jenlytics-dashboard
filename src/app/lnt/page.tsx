@@ -4,12 +4,12 @@ import { useEffect, useState } from "react";
 
 type Site = { code: string; name?: string };
 
-const API = process.env.NEXT_PUBLIC_API_URL!; // must be set in Render env
+const API = process.env.NEXT_PUBLIC_API_URL!;
 
 export default function LntPage() {
   const [sites, setSites] = useState<Site[]>([]);
   const [loading, setLoading] = useState(true);
-  const [err, setErr] = useState<string>("");
+  const [err, setErr] = useState("");
 
   useEffect(() => {
     (async () => {
@@ -27,13 +27,9 @@ export default function LntPage() {
           setSites([]);
           return;
         }
-        const j = await r.json().catch(() => []);
-        if (!Array.isArray(j)) {
-          setErr("Unexpected response shape");
-          setSites([]);
-          return;
-        }
-        setSites(j);
+        const j = await r.json();
+        if (Array.isArray(j)) setSites(j);
+        else setErr("Unexpected response shape");
       } catch (e: any) {
         setErr(String(e?.message || e));
         setSites([]);
@@ -81,5 +77,6 @@ export default function LntPage() {
     </main>
   );
 }
+
 
 
