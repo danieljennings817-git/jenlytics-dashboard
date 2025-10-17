@@ -8,14 +8,32 @@ import {
 } from "chart.js";
 ChartJS.register(LineElement, PointElement, CategoryScale, LinearScale, Tooltip, Legend, Filler);
 
-type Meter = { id: string; meter_id: string; type: string; unit: string };
+type Meter = { id?: string; meter_id: string; type: string; unit: string };
 type Point = { ts: string; value: number };
 type Tariff = { unit: string; unit_rate: number; standing_charge: number; currency: string } | null;
 
 const API = process.env.NEXT_PUBLIC_API_URL!;
 
+// Money fmt
 const fmtMoney = (v:number, ccy='GBP') =>
   new Intl.NumberFormat('en-GB', { style:'currency', currency: ccy }).format(v);
+
+// helpers for datetime-local <-> Date
+function toLocalInputValue(d: Date) {
+  const pad = (n:number) => String(n).padStart(2, "0");
+  const yyyy = d.getFullYear();
+  const mm = pad(d.getMonth() + 1);
+  const dd = pad(d.getDate());
+  const hh = pad(d.getHours());
+  const mi = pad(d.getMinutes());
+  return `${yyyy}-${mm}-${dd}T${hh}:${mi}`;
+}
+function fromLocalInputValue(s: string): Date | null {
+  if (!s) return null;
+  // treat the input as local time
+  const d = new Date(s);
+  return isNaN(+d) ? null : d;
+}
 
 export default function ClientSitePage({ code }: { code: string }) {
   const [meters, setMeters] = useState<Meter[]>([]);
@@ -24,6 +42,13 @@ export default function ClientSitePage({ code }: { code: string }) {
   const [tariff, setTariff] = useState<Tariff>(null);
   const [showCost, setShowCost] = useState(false);
   const [tab, setTab] = useState<"meters"|"billing">("meters");
+
+  // ---- Date range state (defaults to last 30 days) ----
+  const now = new Date();
+  const thirtyDaysAgo = new Date(now.getTime() - 30 * 24 * 3600 * 1000);
+
+  const [fromStr, setFromStr] = useState<string>(toLocalInputValue(thirtyDaysAgo));
+  const [toStr, setToStr]   = useState<string>(toLocalInputValue(now));
 
   // Billing state
   const [bill, setBill] = useState<any>(null);
@@ -52,9 +77,22 @@ export default function ClientSitePage({ code }: { code: string }) {
   // Load interval series + tariff for selected meter
   useEffect(() => {
     if (!selectedMeter) return;
+
+    // figure out how many hours to request so that [from,to] is covered.
+    // API supports only "hours since now", so we ask for (now - from) up to a cap.
+    const from = fromLocalInputValue(fromStr) ?? thirtyDaysAgo;
+    const to = fromLocalInputValue(toStr) ?? now;
+    const msBack = Math.max(0, now.getTime() - (from?.getTime() ?? now.getTime()));
+    const hoursBack = Math.ceil(msBack / 3600000);
+    const HOURS_CAP = 24 * 365; // 1 year max
+    const hours = Math.min(Math.max(hoursBack, 24), HOURS_CAP);
+
     (async () => {
       try {
-        const r = await fetch(`${API}/series?site_code=${encodeURIComponent(code)}&meter_id=${encodeURIComponent(selectedMeter.meter_id)}&hours=720`, { cache: "no-store" });
+        const r = await fetch(
+          `${API}/series?site_code=${encodeURIComponent(code)}&meter_id=${encodeURIComponent(selectedMeter.meter_id)}&hours=${hours}`,
+          { cache: "no-store" }
+        );
         const j = await r.json().catch(() => []);
         setSeries(asArray<Point>(j, []));
       } catch (e) {
@@ -62,6 +100,7 @@ export default function ClientSitePage({ code }: { code: string }) {
         setSeries([]);
       }
     })();
+
     (async () => {
       try {
         const r = await fetch(`${API}/tariffs?meter_id=${encodeURIComponent(selectedMeter.meter_id)}`, { cache: "no-store" });
@@ -72,25 +111,41 @@ export default function ClientSitePage({ code }: { code: string }) {
         setTariff(null);
       }
     })();
-  }, [selectedMeter, code]);
+  // refetch when meter or the chosen window changes
+  }, [selectedMeter, code, fromStr, toStr]);
+
+  // Filter series to chosen [from,to]
+  const filteredSeries: Point[] = useMemo(() => {
+    const s = asArray<Point>(series, []);
+    const from = fromLocalInputValue(fromStr);
+    const to   = fromLocalInputValue(toStr);
+    if (!from || !to) return s;
+    const fromMs = from.getTime();
+    const toMs   = to.getTime();
+    return s.filter(p => {
+      const t = +new Date(p.ts);
+      return t >= fromMs && t <= toMs;
+    });
+  }, [series, fromStr, toStr]);
 
   // Compute “cost” overlay
   const costSeries: Point[] = useMemo(() => {
-    const s = asArray<Point>(series, []);
+    const s = asArray<Point>(filteredSeries, []);
     if (!tariff || s.length === 0) return [];
     const perPointStanding = (tariff.standing_charge || 0) / s.length; // viz only
     return s.map(p => ({
       ts: p.ts,
       value: (Number(p.value) || 0) * (tariff.unit_rate || 0) + perPointStanding
     }));
-  }, [series, tariff]);
+  }, [filteredSeries, tariff]);
 
-  const safeSeries = asArray<Point>(series, []);
+  // Chart data
   const chartData = useMemo(() => {
-    const labels = safeSeries.map(p => new Date(p.ts).toLocaleTimeString());
+    const s = asArray<Point>(filteredSeries, []);
+    const labels = s.map(p => new Date(p.ts).toLocaleString());
     const datasets:any[] = [{
       label: selectedMeter ? `${selectedMeter.meter_id} (${selectedMeter.unit})` : "Usage",
-      data: safeSeries.map(p => Number(p.value) || 0),
+      data: s.map(p => Number(p.value) || 0),
       borderColor: "#111", backgroundColor: "rgba(0,0,0,.06)", fill: true, tension: .3, pointRadius: 0, borderWidth: 2,
     }];
     if (showCost && costSeries.length) {
@@ -102,7 +157,7 @@ export default function ClientSitePage({ code }: { code: string }) {
       });
     }
     return { labels, datasets };
-  }, [safeSeries, selectedMeter, showCost, costSeries]);
+  }, [filteredSeries, selectedMeter, showCost, costSeries]);
 
   // Billing fetch (site-level)
   useEffect(() => {
@@ -225,15 +280,40 @@ export default function ClientSitePage({ code }: { code: string }) {
 
           {/* Right: chart */}
           <section className="bg-white border border-gray-200 rounded-xl p-4">
-            <div className="flex items-center justify-between mb-2">
+            <div className="flex items-center justify-between mb-2 gap-3">
               <div>
                 <div className="text-xs text-gray-500">Selected meter</div>
                 <div className="font-bold">{selectedMeter?.meter_id ?? "—"}</div>
               </div>
-              <label className="text-sm text-gray-700 flex items-center gap-1">
-                <input type="checkbox" checked={showCost} onChange={e => setShowCost(e.target.checked)} />
-                Show cost
-              </label>
+
+              {/* Range controls + show cost */}
+              <div className="flex items-center gap-2">
+                <div className="flex items-center gap-1 text-xs">
+                  <label className="text-gray-600">From:</label>
+                  <input
+                    type="datetime-local"
+                    className="border rounded px-2 py-1"
+                    value={fromStr}
+                    onChange={(e) => setFromStr(e.target.value)}
+                    max={toStr}
+                  />
+                </div>
+                <div className="flex items-center gap-1 text-xs">
+                  <label className="text-gray-600">To:</label>
+                  <input
+                    type="datetime-local"
+                    className="border rounded px-2 py-1"
+                    value={toStr}
+                    onChange={(e) => setToStr(e.target.value)}
+                    min={fromStr}
+                  />
+                </div>
+
+                <label className="text-sm text-gray-700 flex items-center gap-1 ml-2">
+                  <input type="checkbox" checked={showCost} onChange={e => setShowCost(e.target.checked)} />
+                  Show cost
+                </label>
+              </div>
             </div>
 
             <div style={{ height: 380 }}>
@@ -295,3 +375,4 @@ export default function ClientSitePage({ code }: { code: string }) {
     </main>
   );
 }
+
