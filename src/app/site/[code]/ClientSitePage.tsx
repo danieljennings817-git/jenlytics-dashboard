@@ -54,7 +54,7 @@ export default function ClientSitePage({ code }: { code: string }) {
     if (!selectedMeter) return;
     (async () => {
       try {
-        const r = await fetch(`${API}/series?site_code=${encodeURIComponent(code)}&meter_id=${encodeURIComponent(selectedMeter.meter_id)}&hours=24`, { cache: "no-store" });
+        const r = await fetch(`${API}/series?site_code=${encodeURIComponent(code)}&meter_id=${encodeURIComponent(selectedMeter.meter_id)}&hours=720`, { cache: "no-store" });
         const j = await r.json().catch(() => []);
         setSeries(asArray<Point>(j, []));
       } catch (e) {
